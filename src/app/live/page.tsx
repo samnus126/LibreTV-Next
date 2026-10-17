@@ -50,8 +50,6 @@ function LiveContent() {
   const customImageProxy = useAppStore((s) => s.customImageProxy);
   const { verified } = useAuth();
   const [copied, setCopied] = useState(false);
-  // 移动端频道抽屉开合
-  const [listOpen, setListOpen] = useState(false);
   const [logoFailed, setLogoFailed] = useState(false);
   /** 侧栏上报的筛选排序结果（键盘换台沿此列表顺序）；ref 存储，不触发重渲染 */
   const filteredRef = useRef<LiveChannelItem[]>([]);
@@ -197,8 +195,6 @@ function LiveContent() {
   const handleSelect = useCallback(
     (c: LiveChannelItem) => {
       selectChannel(c);
-      // 移动端抽屉：选中即收起
-      setListOpen(false);
     },
     [selectChannel]
   );
@@ -221,7 +217,7 @@ function LiveContent() {
     <div className="min-h-screen flex flex-col">
       <Header showSearch />
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-4">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
           {/* 主栏：播放器 + 信息条 + 节目单 */}
           <div className="min-w-0">
             <div className="aspect-video bg-black rounded-lg overflow-hidden">
@@ -242,7 +238,7 @@ function LiveContent() {
                         : '请先在设置中添加直播源（M3U 订阅）'
                       : playlistsQuery.isLoading
                         ? '频道列表加载中...'
-                        : '从右侧选择一个频道开始观看'}
+                        : '从频道列表选择一个频道开始观看'}
                   </p>
                 </div>
               )}
@@ -387,37 +383,12 @@ function LiveContent() {
             )}
           </div>
 
-          {/* 移动端抽屉遮罩 */}
-          {listOpen && (
-            <div
-              className="fixed inset-0 z-30 bg-black/50 lg:hidden"
-              aria-hidden="true"
-              onClick={() => setListOpen(false)}
-            />
-          )}
-
-          {/* 侧栏：桌面常驻 sticky；移动端底部抽屉 */}
+          {/* 窄屏直接在播放器下方显示，桌面仍保留右侧列表。 */}
           <aside
-            className={cn(
-              'bg-surface-raised border border-line flex-col overflow-hidden',
-              'fixed inset-x-0 bottom-0 z-40 h-[75vh] rounded-t-2xl shadow-2xl',
-              listOpen ? 'flex' : 'hidden',
-              'lg:sticky lg:top-20 lg:flex lg:h-[calc(100vh-6.5rem)] lg:rounded-xl lg:shadow-none'
-            )}
+            aria-label="直播频道列表"
+            className="min-w-0 bg-surface-raised border border-line flex flex-col overflow-hidden h-[65vh] min-h-[320px] rounded-xl lg:sticky lg:top-20 lg:h-[calc(100vh-6.5rem)]"
           >
-            {/* 抽屉把手栏（仅移动端） */}
-            <div className="flex items-center justify-between px-3 pt-3 pb-1 shrink-0 lg:hidden">
-              <span className="text-sm font-semibold text-content">频道列表</span>
-              <button
-                className="rounded-md p-1.5 text-muted hover:text-content hover:bg-hover transition-colors"
-                aria-label="关闭频道列表"
-                onClick={() => setListOpen(false)}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+            <h2 className="px-3 pt-3 pb-1 text-sm font-semibold shrink-0">频道列表</h2>
             <div className="flex-1 min-h-0 flex flex-col">
               {playlistsQuery.isLoading && channels.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center">
@@ -444,24 +415,6 @@ function LiveContent() {
             </div>
           </aside>
         </div>
-
-        {/* 移动端呼出频道列表的悬浮按钮 */}
-        {!listOpen && channels.length > 0 && (
-          <button
-            className="fixed bottom-4 right-4 z-30 flex items-center gap-1.5 rounded-full bg-accent px-4 py-2.5 text-sm text-on-accent shadow-lg lg:hidden"
-            onClick={() => setListOpen(true)}
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-            频道
-          </button>
-        )}
       </main>
     </div>
   );

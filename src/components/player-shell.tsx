@@ -307,9 +307,10 @@ export function PlayerShell({
   useEffect(() => {
     if (!containerRef.current || !propsRef.current.url) return;
     const initialUrl = propsRef.current.url;
-    // ArtPlayer 默认 3 秒才隐藏控制栏；播放器失去鼠标悬停后缩短为 0.8 秒。
+    // 仅鼠标设备使用快速隐藏；触屏保留 3 秒以便点击或拖动进度条。
+    const mouseControls = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
     const previousControlHideTime = Artplayer.CONTROL_HIDE_TIME;
-    Artplayer.CONTROL_HIDE_TIME = 800;
+    Artplayer.CONTROL_HIDE_TIME = mouseControls ? 800 : 3000;
 
     // 初始化每集状态
     mediaHealthyRef.current = true;
@@ -485,9 +486,11 @@ export function PlayerShell({
       controlHideTimer = null;
       art.controls.show = false;
     };
-    el?.addEventListener('mousemove', showControlsOnPointerMove);
-    el?.addEventListener('mouseleave', hideControlsOnMouseLeave);
-    showControlsOnPointerMove();
+    if (mouseControls) {
+      el?.addEventListener('mousemove', showControlsOnPointerMove);
+      el?.addEventListener('mouseleave', hideControlsOnMouseLeave);
+      showControlsOnPointerMove();
+    }
 
     const onTouchStart = (e: TouchEvent) => {
       if (art.video?.paused) return;
@@ -586,7 +589,7 @@ export function PlayerShell({
   }, [adFilter]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="media-player relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" style={{ WebkitTouchCallout: 'none' }} />
       {showPoster && !error && (
         <div

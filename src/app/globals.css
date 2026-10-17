@@ -154,3 +154,60 @@ body {
   0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
   50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
 }
+
+/* Keep player gestures from dragging the page horizontally. Nested channel
+   group strips retain their own intentional horizontal scrolling. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+
+.media-player {
+  min-width: 0;
+}
+
+body .art-video-player {
+  touch-action: pan-y;
+  overscroll-behavior-x: contain;
+}
+
+body .art-video-player .art-progress {
+  touch-action: none;
+}
+
+@media (max-width: 640px) {
+  /* A single row exceeds a phone's width and clips the rightmost buttons. */
+  body .art-video-player,
+  body .art-video-player.art-mobile {
+    --art-control-height: 36px;
+    --art-bottom-gap: 8px;
+  }
+
+  body .art-video-player .art-controls {
+    height: auto;
+    flex-wrap: wrap;
+  }
+
+  body .art-video-player .art-controls .art-controls-left,
+  body .art-video-player .art-controls .art-controls-right {
+    flex: 0 0 100%;
+    min-width: 0;
+    height: var(--art-control-height);
+    margin: 0;
+  }
+
+  body .art-video-player .art-controls .art-controls-right {
+    justify-content: space-evenly;
+  }
+
+  /* The miniature progress bar must hide two rows, including in web fullscreen
+     where Artplayer reparents the player directly under body. */
+  body .art-video-player.art-mini-progress-bar:not(.art-hover):not(.art-control-show) .art-bottom .art-controls,
+  body .art-video-player.art-mini-progress-bar:not(.art-hover):not(.art-control-show) .art-bottom .art-progress,
+  body .art-video-player.art-lock .art-bottom .art-controls,
+  body .art-video-player.art-lock .art-bottom .art-progress {
+    transform: translateY(calc(var(--art-control-height) * 2 + var(--art-bottom-gap) + var(--art-progress-height) / 4));
+  }
+}

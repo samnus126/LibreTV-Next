@@ -372,7 +372,7 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
   }, [url, retryNonce, onPrevChannel, onNextChannel]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="media-player relative w-full h-full">
       <div ref={containerRef} className="w-full h-full" />
       {/* 起播前的品牌占位图 */}
       {showPoster && !error && (
