@@ -336,6 +336,7 @@ export function PlayerShell({
       aspectRatio: true,
       fullscreen: true,
       fullscreenWeb: true,
+      autoOrientation: true,
       miniProgressBar: true,
       mutex: true,
       backdrop: true,

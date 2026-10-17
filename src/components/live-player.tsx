@@ -305,6 +305,7 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       aspectRatio: false,
       fullscreen: true,
       fullscreenWeb: true,
+      autoOrientation: true,
       miniProgressBar: false,
       hotkey: false,
       mutex: true,
