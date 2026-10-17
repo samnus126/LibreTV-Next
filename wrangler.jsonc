@@ -16,6 +16,6 @@
   "vars": {
     "COOKIE_SECURE": "true",
     "DEFAULT_SOURCES": "[{\"name\":\"暴风资源\",\"url\":\"https://bfzyapi.com/api.php/provide/vod\",\"isAdult\":false},{\"name\":\"非凡资源\",\"url\":\"https://cj.ffzyapi.com/api.php/provide/vod\",\"isAdult\":false},{\"name\":\"量子资源\",\"url\":\"https://cj.lziapi.com/api.php/provide/vod\",\"isAdult\":false},{\"name\":\"无尽资源\",\"url\":\"https://api.wujinapi.me/api.php/provide/vod\",\"isAdult\":false},{\"name\":\"360资源\",\"url\":\"https://360zy.com/api.php/provide/vod\",\"isAdult\":false},{\"name\":\"光速资源\",\"url\":\"https://api.guangsuapi.com/api.php/provide/vod\",\"isAdult\":false}]",
-    "DEFAULT_LIVE_SOURCES": "[{\"name\":\"中国大陆电视（IPTV-org）\",\"url\":\"https://iptv-org.github.io/iptv/countries/cn.m3u\"},{\"name\":\"香港电视（IPTV-org）\",\"url\":\"https://iptv-org.github.io/iptv/countries/hk.m3u\"}]"
+    "DEFAULT_LIVE_SOURCES": "[{\"name\":\"IPTV4\",\"url\":\"https://gh-proxy.com/raw.githubusercontent.com/vbskycn/iptv/refs/heads/master/tv/iptv4.m3u\"},{\"name\":\"香港电视（IPTV-org）\",\"url\":\"https://iptv-org.github.io/iptv/countries/hk.m3u\"}]"
   }
 }
