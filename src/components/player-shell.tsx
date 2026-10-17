@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
 import { enableHlsAirPlay } from '@/lib/airplay';
+import { shouldThrottlePrefetch } from '@/lib/playback-bandwidth';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
 import { createHlsLoader } from '@/lib/hls-loader';
@@ -102,6 +103,7 @@ export function PlayerShell({
   const restoreCleanupRef = useRef<(() => void) | null>(null);
   // timeupdate 续跑预取的游标：必须按集清零，否则会沿用上一集的时间戳推迟首次续跑
   const lastPrefetchEnsureRef = useRef(0);
+  const prefetchThrottledRef = useRef(true);
   // setupHls 可能改走代理形式，video:error 重试要用最近一次的地址
   const currentMediaUrlRef = useRef(url);
   // 本集的恢复策略实例：跨直连/代理两级重建共享计数
@@ -170,6 +172,9 @@ export function PlayerShell({
    * 注意：不销毁 ArtPlayer，只销毁并重建 hls，从而保留网页全屏等播放器状态。
    */
   const setupHls = (video: HTMLVideoElement, mediaUrl: string, allowProxyFallback: boolean) => {
+    prefetchThrottledRef.current = true;
+    getVideoPrefetcher().setThrottled(true);
+    getNextEpisodePrefetcher().setThrottled(true);
     restoreCleanupRef.current?.();
     restoreCleanupRef.current = null;
     hlsRef.current?.destroy();
@@ -301,6 +306,7 @@ export function PlayerShell({
     recoveryRef.current = new PlaybackRecovery();
     // 换集时清掉上一集的预取窗口，避免带宽被旧集占用
     getVideoPrefetcher().stop();
+    getNextEpisodePrefetcher().stop();
     setError('');
     setShowPoster(true);
     const art = artRef.current;
@@ -358,6 +364,15 @@ export function PlayerShell({
       },
     });
     artRef.current = art;
+    const throttlePrefetch = (value: boolean) => {
+      prefetchThrottledRef.current = value;
+      getVideoPrefetcher().setThrottled(value);
+      getNextEpisodePrefetcher().setThrottled(value);
+    };
+    const updatePrefetchPriority = () => {
+      throttlePrefetch(shouldThrottlePrefetch(art.video, prefetchThrottledRef.current));
+    };
+    throttlePrefetch(true);
 
     /**
      * 读解码后的真实分辨率。
@@ -404,6 +419,7 @@ export function PlayerShell({
       setError('视频播放失败，请尝试其他视频源');
     });
     art.on('video:timeupdate', () => {
+      updatePrefetchPriority();
       const now = Date.now();
       if (now - lastSave > 5000) {
         lastSave = now;
@@ -418,22 +434,22 @@ export function PlayerShell({
       }
     });
     art.on('video:seeked', () => {
+      updatePrefetchPriority();
       ensurePrefetch(currentMediaUrlRef.current, art.currentTime);
     });
     art.on('video:pause', () => {
       propsRef.current.onPause?.(art.currentTime, art.duration);
       // 暂停 = 预取黄金窗口：解除限速并无限铺满整集（用户主动行为，带宽占用可接受）
       // waiting 触发的限速在此解除，否则黄金窗口会被 500ms 轮询冻结
-      getVideoPrefetcher().setThrottled(false);
+      updatePrefetchPriority();
       ensurePrefetch(currentMediaUrlRef.current, art.currentTime, 0);
     });
     art.on('video:waiting', () => {
       // 卡顿：预取临时让出带宽给播放
-      getVideoPrefetcher().setThrottled(true);
+      throttlePrefetch(true);
     });
-    art.on('video:playing', () => {
-      getVideoPrefetcher().setThrottled(false);
-    });
+    art.on('video:seeking', () => throttlePrefetch(true));
+    art.on('video:playing', updatePrefetchPriority);
     art.on('video:ended', () => {
       endedRef.current = true;
       propsRef.current.onEnded?.();
@@ -568,6 +584,7 @@ export function PlayerShell({
       hlsRef.current = null;
       recoveryRef.current?.dispose();
       getVideoPrefetcher().stop();
+      getNextEpisodePrefetcher().stop();
       art.destroy();
       artRef.current = null;
     };

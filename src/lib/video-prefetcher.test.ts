@@ -174,6 +174,39 @@ describe('VideoPrefetcher.ensure 幂等', () => {
   });
 });
 
+describe('VideoPrefetcher cached fragments', () => {
+  it('does not download already cached fragments again when a completed window is refreshed', async () => {
+    const stored = new Map([
+      ['https://cdn.example/a.ts', new Response('cached-a')],
+      ['https://cdn.example/b.ts', new Response('cached-b')],
+    ]);
+    vi.stubGlobal('caches', {
+      open: async () => ({ match: async (key: string) => stored.get(key)?.clone() }),
+      delete: async () => true,
+    });
+    const downloads: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.endsWith('.m3u8')) {
+        return new Response('#EXTM3U\n#EXTINF:5,\na.ts\n#EXTINF:5,\nb.ts\n#EXT-X-ENDLIST');
+      }
+      downloads.push(url);
+      return new Response('network-fragment');
+    });
+    const pf = new VideoPrefetcher();
+    const options = { m3u8Url: 'https://cdn.example/index.m3u8', currentTime: 0, episodeKey: 'cached' };
+    try {
+      pf.ensure(options);
+      await vi.waitFor(() => expect(pf.getStats().state).toBe('done'));
+      pf.ensure(options);
+      await vi.waitFor(() => expect(pf.getStats().state).toBe('done'));
+      expect(downloads).toEqual([]);
+      expect(pf.getStats().cached).toBe(2);
+    } finally {
+      pf.stop();
+    }
+  });
+});
+
 describe('缓存 key 归一（代理形态根相对地址）', () => {
   const APP = 'https://app.example.com';
   const UPSTREAM = 'https://cdn.example.com/live/index.m3u8';
