@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
+import { enableHlsAirPlay } from '@/lib/airplay';
 import { Spinner } from './states';
 
 /**
@@ -148,6 +149,7 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       const hlsConfig: Partial<HlsConfig> = {
         debug: false,
         enableWorker: true,
+        preferManagedMediaSource: true,
         liveSyncDurationCount: 3,
         lowLatencyMode: false,
         backBufferLength: 30,
@@ -160,6 +162,9 @@ export function LivePlayer({ url, title, onPrevChannel, onNextChannel }: LivePla
       };
       const hls = new Hls(hlsConfig);
       hlsRef.current = hls;
+      hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+        enableHlsAirPlay(video, url);
+      });
       hls.loadSource(mediaUrl);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, (_evt, manifestData) => {

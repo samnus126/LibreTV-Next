@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
+import { enableHlsAirPlay } from '@/lib/airplay';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
 import { createHlsLoader } from '@/lib/hls-loader';
@@ -122,6 +123,7 @@ export function PlayerShell({
     return {
       debug: false,
       enableWorker: true,
+      preferManagedMediaSource: true,
       backBufferLength: 90,
       maxBufferLength: cacheEnabled ? 120 : 30,
       maxMaxBufferLength: cacheEnabled ? 600 : 60,
@@ -213,6 +215,9 @@ export function PlayerShell({
       restoreEvents.forEach((event) => video.removeEventListener(event, onRestoreEvent));
     };
 
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+      enableHlsAirPlay(video, propsRef.current.url);
+    });
     hls.loadSource(mediaUrl);
     hls.attachMedia(video);
 
