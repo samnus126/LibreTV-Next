@@ -11,19 +11,25 @@ export function getEnvSources(): SourceConfig[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) throw new Error('必须是 JSON 数组');
+    const keys = new Set<string>();
     const list: SourceConfig[] = parsed.map((item, i) => {
       if (typeof item !== 'object' || item === null) {
         throw new Error(`第 ${i + 1} 项不是对象`);
       }
-      const { name, url, detail, isAdult } = item as Record<string, unknown>;
+      const { name, url, detail, isAdult, key: explicitKey } = item as Record<string, unknown>;
       if (typeof name !== 'string' || !name.trim()) {
         throw new Error(`第 ${i + 1} 项缺少 name`);
       }
       if (typeof url !== 'string' || !/^https?:\/\//.test(url.trim())) {
         throw new Error(`第 ${i + 1} 项的 url 必须以 http:// 或 https:// 开头`);
       }
+      const key = explicitKey === undefined ? `env_${i}` : explicitKey;
+      if (typeof key !== 'string' || !/^env_(0|[1-9]\d*)$/.test(key) || keys.has(key)) {
+        throw new Error(`第 ${i + 1} 项的 key 必须是唯一的 env_N`);
+      }
+      keys.add(key);
       return {
-        key: `env_${i}`,
+        key,
         name: name.trim(),
         url: url.trim().replace(/\/+$/, ''),
         detail: typeof detail === 'string' && detail.trim() ? detail.trim() : undefined,

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
-import { enableHlsAirPlay } from '@/lib/airplay';
+import { createNativeAirPlay, enableHlsAirPlay } from '@/lib/airplay';
 import { shouldThrottlePrefetch } from '@/lib/playback-bandwidth';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
@@ -69,6 +69,7 @@ export function PlayerShell({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const artRef = useRef<any>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const nativeAirPlayRef = useRef<ReturnType<typeof createNativeAirPlay> | null>(null);
   const [error, setError] = useState('');
   const [hint, setHint] = useState('');
   // 起播前的品牌占位图（沿用旧版 nomedia 素材），实际开始播放后隐藏
@@ -145,6 +146,7 @@ export function PlayerShell({
 
   // 当前集预取（episodeKey 缺省 = 关闭，见 ensure 内部 settings.enabled 判断）
   const ensurePrefetch = (mediaUrl: string, currentTime: number, horizonSeconds?: number) => {
+    if (nativeAirPlayRef.current?.active) return;
     const p = propsRef.current;
     if (!p.episodeKey) return;
     getVideoPrefetcher().ensure({
@@ -171,7 +173,9 @@ export function PlayerShell({
    * 自动改走同源 cookie 鉴权的 /api/proxy 重试一次。
    * 注意：不销毁 ArtPlayer，只销毁并重建 hls，从而保留网页全屏等播放器状态。
    */
-  const setupHls = (video: HTMLVideoElement, mediaUrl: string, allowProxyFallback: boolean) => {
+  const setupHls = (video: HTMLVideoElement, mediaUrl: string, allowProxyFallback: boolean,
+    resume?: { position: number; shouldPlay: boolean }) => {
+    nativeAirPlayRef.current?.reset();
     prefetchThrottledRef.current = true;
     getVideoPrefetcher().setThrottled(true);
     getNextEpisodePrefetcher().setThrottled(true);
@@ -184,6 +188,7 @@ export function PlayerShell({
 
     let restoreInFlight = false;
     const restoreAndStart = async () => {
+      if (hlsRef.current !== hls || nativeAirPlayRef.current?.active) return;
       if (restoredRef.current || restoreInFlight) return;
 
       // MANIFEST_PARSED 早于 loadedmetadata 的 HLS 源很常见；没有有效时长时
@@ -193,19 +198,21 @@ export function PlayerShell({
 
       restoreInFlight = true;
       try {
-        const saved = (await propsRef.current.getRestorePosition?.()) ?? 0;
+        const saved = resume ? resume.position : (await propsRef.current.getRestorePosition?.()) ?? 0;
+        if (hlsRef.current !== hls || nativeAirPlayRef.current?.active) return;
         const currentDuration = artRef.current?.duration || video.duration || duration;
         let prefetchAnchor = video.currentTime;
-        if (saved > 10 && Number.isFinite(currentDuration) && saved < currentDuration - 2) {
-          if (artRef.current) artRef.current.currentTime = saved;
-          prefetchAnchor = saved;
-          showHint(`已从 ${formatTime(saved)} 继续播放`);
+        const target = resume ? Math.min(Math.max(0, saved), Math.max(0, currentDuration - 0.1)) : saved;
+        if (Number.isFinite(currentDuration) && (resume || (saved > 10 && saved < currentDuration - 2))) {
+          if (artRef.current) artRef.current.currentTime = target;
+          prefetchAnchor = target;
+          showHint(`已从 ${formatTime(target)} 继续播放`);
         }
         restoredRef.current = true;
         restoreCleanupRef.current?.();
         restoreCleanupRef.current = null;
         ensurePrefetch(mediaUrl, prefetchAnchor);
-        video.play().catch(() => {});
+        if (!resume || resume.shouldPlay) video.play().catch(() => {});
       } catch {
         // IndexedDB 读取失败时不阻塞播放，后续事件仍可再次尝试恢复。
       } finally {
@@ -352,7 +359,7 @@ export function PlayerShell({
       mutex: true,
       backdrop: true,
       playsInline: true,
-      airplay: true,
+      airplay: false,
       hotkey: false,
       theme: '#2563eb',
       lang: navigator.language.toLowerCase().startsWith('zh') ? 'zh-cn' : 'en',
@@ -364,12 +371,42 @@ export function PlayerShell({
       },
     });
     artRef.current = art;
+    const nativeAirPlay = createNativeAirPlay(art.video, {
+      beforeNative: () => {
+        restoreCleanupRef.current?.();
+        restoreCleanupRef.current = null;
+        recoveryRef.current?.dispose();
+        hlsRef.current?.destroy();
+        hlsRef.current = null;
+        getVideoPrefetcher().stop();
+        getNextEpisodePrefetcher().stop();
+        mediaHealthyRef.current = true;
+        setError('');
+      },
+      restore: (position, shouldPlay) => {
+        restoredRef.current = false;
+        recoveryRef.current = new PlaybackRecovery();
+        setupHls(art.video, propsRef.current.url, true, { position, shouldPlay });
+      },
+      failure: () => showHint('该源原生播放失败，已恢复网页播放，请尝试其他视频源'),
+    });
+    nativeAirPlayRef.current = nativeAirPlay;
+    if ('webkitShowPlaybackTargetPicker' in art.video && typeof art.video.webkitShowPlaybackTargetPicker === 'function') {
+      art.controls.add({
+        name: 'airplay', position: 'right', index: 50,
+        html: art.icons.airplay, tooltip: '隔空播放',
+        click: () => {
+          if (!nativeAirPlay.request(propsRef.current.url)) showHint('当前浏览器或视频源暂不支持隔空播放');
+        },
+      });
+    }
     const throttlePrefetch = (value: boolean) => {
       prefetchThrottledRef.current = value;
       getVideoPrefetcher().setThrottled(value);
       getNextEpisodePrefetcher().setThrottled(value);
     };
     const updatePrefetchPriority = () => {
+      if (nativeAirPlay.active) { throttlePrefetch(true); return; }
       throttlePrefetch(shouldThrottlePrefetch(art.video, prefetchThrottledRef.current));
     };
     throttlePrefetch(true);
@@ -407,6 +444,7 @@ export function PlayerShell({
       reportVideoHeight();
     });
     art.on('video:error', () => {
+      if (nativeAirPlay.active) return;
       mediaHealthyRef.current = false;
       // 起播阶段的 video 元素级错误（MSE/解码偶发失败）：重建一次播放链路自愈，
       // 而不是直接钉死错误遮罩——重建后视频轨重新 append，黑屏有声即可解除
@@ -438,6 +476,7 @@ export function PlayerShell({
       ensurePrefetch(currentMediaUrlRef.current, art.currentTime);
     });
     art.on('video:pause', () => {
+      if (nativeAirPlay.active) return;
       propsRef.current.onPause?.(art.currentTime, art.duration);
       // 暂停 = 预取黄金窗口：解除限速并无限铺满整集（用户主动行为，带宽占用可接受）
       // waiting 触发的限速在此解除，否则黄金窗口会被 500ms 轮询冻结
@@ -580,6 +619,8 @@ export function PlayerShell({
       restoreCleanupRef.current?.();
       restoreCleanupRef.current = null;
       Artplayer.CONTROL_HIDE_TIME = previousControlHideTime;
+      nativeAirPlay.dispose();
+      nativeAirPlayRef.current = null;
       hlsRef.current?.destroy();
       hlsRef.current = null;
       recoveryRef.current?.dispose();

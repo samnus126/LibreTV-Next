@@ -390,3 +390,43 @@ describe('订阅整体开关', () => {
     expect(isInDisabledSubscription(store(), 'manual_0')).toBe(false);
   });
 });
+
+
+describe('deployment source cleanup', () => {
+  beforeEach(() => useAppStore.setState({ envSources: [], envKeysSeen: [], sourceCleanup20261019: false }));
+  it('removes only exact unchecked retired URLs once, preserving selected and unrelated entries', () => {
+    const urls = [
+      'HTTP://API.APIBDZY.COM/api.php/provide/vod/',
+      'https://api.wujinapi.me/api.php/provide/vod',
+      'https://360zy.com/api.php/provide/vod/',
+      'https://api.wsyzy.net/api.php/provide/vod/from/wsym3u8/',
+    ];
+    const entries = urls.map((url, i) => ({ key: `manual_${i}`, name: '源', url }));
+    const selected = { key: 'keep_selected', name: '百度', url: urls[0] };
+    const unrelated = { key: 'keep_other', name: '百度', url: 'https://api.apibdzy.com/different' };
+    const health = { keep_selected: { ok: true, failStreak: 0, timestamp: 1 } };
+    useAppStore.setState({ customAPIs: [...entries, selected, unrelated], selectedKeys: ['keep_selected'], sourceHealth: health });
+    store().setEnvSources([]);
+    expect(store().customAPIs).toEqual([selected, unrelated]);
+    expect(store().selectedKeys).toEqual(['keep_selected']);
+    expect(store().sourceHealth).toEqual(health);
+    expect(store().sourceCleanup20261019).toBe(true);
+    store().addCustomApi(entries[0]);
+    store().toggleSourceSelected(entries[0].key);
+    store().setEnvSources([]);
+    expect(store().customAPIs).toContainEqual(entries[0]);
+  });
+  it('suppresses only new duplicate presets and preserves custom identities and selection', () => {
+    const custom = { key: 'manual_42', name: '魔都', url: 'http://modu.example/api.php/provide/vod/' };
+    useAppStore.setState({ customAPIs: [custom], selectedKeys: ['manual_42'], envKeysSeen: ['env_0'] });
+    store().setEnvSources([
+      { key: 'env_0', name: '旧预置', url: 'https://modu.example/api.php/provide/vod' },
+      { key: 'env_8', name: '魔都', url: 'https://modu.example/api.php/provide/vod' },
+      { key: 'env_9', name: '红牛', url: 'https://red.example/api.php/provide/vod' },
+    ]);
+    expect(store().envSources.map(s => s.key)).toEqual(['env_0', 'env_9']);
+    expect(store().customAPIs).toEqual([custom]);
+    expect(store().selectedKeys).toEqual(['manual_42', 'env_9']);
+    expect(store().envKeysSeen).not.toContain('env_8');
+  });
+});

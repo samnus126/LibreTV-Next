@@ -180,6 +180,8 @@ interface AppState extends AppSettings {
   envSources: SourceConfig[];
   /** 已向用户展示过并自动勾选过的预置源 key（持久化：用户取消勾选后不再反复勾上） */
   envKeysSeen: string[];
+  /** 2026-10-19 按用户指定列表清理未勾选手动源；只运行一次，允许以后主动重新添加。 */
+  sourceCleanup20261019: boolean;
   subscriptions: SourceSubscription[];
   /** —— 直播模块 —— */
   /** 部署者通过 DEFAULT_LIVE_SOURCES 预置的直播源（服务端下发，不持久化） */
@@ -281,12 +283,33 @@ function nextCustomKey(apiList: SourceConfig[]): string {
  * 需要在直接写盘前 flush 缓冲，而运行时依赖方向是 store → db，不能反向引用）。
  */
 
+/** 仅用于本次预置迁移的 URL 对照：忽略 http/https 和尾斜杠，保留路径与查询。 */
+function deploymentSourceIdentity(raw: string): string {
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return raw;
+    return `${url.host}${url.pathname.replace(/\/+$/, '')}${url.search}`;
+  } catch {
+    return raw;
+  }
+}
+
+const RETIRED_SOURCE_URLS = new Set([
+  'api.apibdzy.com/api.php/provide/vod',
+  'api.wujinapi.me/api.php/provide/vod',
+  '360zy.com/api.php/provide/vod',
+  'api.wsyzy.net/api.php/provide/vod/from/wsym3u8',
+]);
+// 仅本次新加入的预置源去重，旧 env ID 继续存在以保留历史定位。
+const DEDUPED_DEPLOYMENT_KEYS = new Set(['env_8', 'env_9']);
+
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       customAPIs: [],
       envSources: [],
       envKeysSeen: [],
+      sourceCleanup20261019: false,
       subscriptions: [],
       liveEnvSources: [],
       liveEnvKeysSeen: [],
@@ -368,6 +391,13 @@ export const useAppStore = create<AppState>()(
       setSelectedKeys: (keys) => set({ selectedKeys: keys }),
 
       setEnvSources: (list) => {
+        const current = get();
+        // Providers 先恢复 localStorage 再调用本方法；不触碰历史、进度或保留源的 ID。
+        const customAPIs = current.sourceCleanup20261019 ? current.customAPIs : current.customAPIs.filter(
+          (source) => current.selectedKeys.includes(source.key) || !RETIRED_SOURCE_URLS.has(deploymentSourceIdentity(source.url))
+        );
+        const customUrls = new Set(customAPIs.map((source) => deploymentSourceIdentity(source.url)));
+        list = list.filter((source) => !DEDUPED_DEPLOYMENT_KEYS.has(source.key) || !customUrls.has(deploymentSourceIdentity(source.url)));
         // 预置源首次出现时自动勾选（开箱即搜）；用户此后取消勾选不会被反复勾回
         const seen = new Set(get().envKeysSeen);
         const freshKeys = list.map((s) => s.key).filter((k) => !seen.has(k));
@@ -377,6 +407,8 @@ export const useAppStore = create<AppState>()(
           return !src?.isAdult || !get().yellowFilter;
         });
         set({
+          customAPIs,
+          sourceCleanup20261019: true,
           envSources: list,
           envKeysSeen: [...get().envKeysSeen, ...freshKeys],
           selectedKeys: [...get().selectedKeys, ...toSelect],
@@ -788,6 +820,7 @@ export const useAppStore = create<AppState>()(
         customAPIs: s.customAPIs,
         selectedKeys: s.selectedKeys,
         envKeysSeen: s.envKeysSeen,
+        sourceCleanup20261019: s.sourceCleanup20261019,
         subscriptions: s.subscriptions,
         liveEnvKeysSeen: s.liveEnvKeysSeen,
         liveSubscriptions: s.liveSubscriptions,
