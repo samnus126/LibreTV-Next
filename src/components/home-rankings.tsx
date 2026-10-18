@@ -3,15 +3,18 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/client-api';
+import { cn } from '@/lib/utils';
 import { DoubanCard } from './video-card';
 
 const PAGE_SIZE = 12;
 const CATEGORIES = [
-  { id: 'movie', title: '热门电影', source: '豆瓣电影周榜', list: 'douban_movie_weekly' },
-  { id: 'chinese', title: '国产剧', source: '豆瓣国产剧周榜', list: 'douban_tv_chinese' },
-  { id: 'global', title: '海外剧', source: '豆瓣海外剧周榜', list: 'douban_tv_global' },
+  { id: 'movie', title: '电影周榜', source: '豆瓣电影周榜', list: 'douban_movie_weekly' },
+  { id: 'chinese', title: '国产剧周榜', source: '豆瓣国产剧周榜', list: 'douban_tv_chinese' },
+  { id: 'global', title: '海外剧周榜', source: '豆瓣海外剧周榜', list: 'douban_tv_global' },
+  { id: 'shows', title: '国内综艺', source: '豆瓣国内综艺周榜', list: 'douban_show_chinese' },
+  { id: 'global-shows', title: '海外综艺', source: '豆瓣海外综艺周榜', list: 'douban_show_global' },
+  { id: 'baidu', title: '百度热播剧', source: '百度热播剧榜', list: 'baidu_teleplay' },
   { id: 'anime', title: '动漫', source: '豆瓣动画电影 · 日本动画推荐' },
-  { id: 'shows', title: '综艺', source: '豆瓣国内综艺周榜', list: 'douban_show_chinese' },
   { id: 'documentary', title: '纪录片', source: '豆瓣纪录片推荐', type: 'tv', tag: '纪录片' },
 ] as const;
 
@@ -32,11 +35,26 @@ async function fetchCategory(category: Category, signal: AbortSignal) {
   return api.douban(category.type, category.tag, 0, 50, signal);
 }
 
-/** 首页分区独立请求；单区失败不遮挡其他榜单。 */
+/** 沿用首页分类切换布局，仅请求并展示当前选中的榜单。 */
 export function HomeRankings({ onPick }: { onPick: (title: string) => void }) {
+  const [selectedId, setSelectedId] = useState<Category['id']>('movie');
+  const selected = CATEGORIES.find(category => category.id === selectedId)!;
   return (
-    <div className="space-y-9" aria-label="影视分类推荐">
-      {CATEGORIES.map(category => <RankingCategory key={category.id} category={category} onPick={onPick} />)}
+    <div aria-label="影视榜单推荐">
+      <div className="flex flex-wrap gap-1.5 mb-4" role="group" aria-label="选择榜单">
+        {CATEGORIES.map(category => (
+          <button
+            key={category.id}
+            className={cn('px-2.5 py-1 rounded-full text-xs transition-colors',
+              selectedId === category.id ? 'bg-accent text-on-accent' : 'bg-chip text-muted hover:text-content hover:bg-hover')}
+            aria-pressed={selectedId === category.id}
+            onClick={() => setSelectedId(category.id)}
+          >
+            {category.title}
+          </button>
+        ))}
+      </div>
+      <RankingCategory key={selected.id} category={selected} onPick={onPick} />
     </div>
   );
 }
@@ -52,27 +70,20 @@ function RankingCategory({ category, onPick }: { category: Category; onPick: (ti
 
   return (
     <section data-home-category={category.id} aria-label={category.title}>
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold text-content">{category.title}</h2>
-          <p className="text-xs text-faint mt-1">{category.source}</p>
-        </div>
-        {items.length > 0 && <span className="shrink-0 text-xs text-faint">{items.length} 部</span>}
-      </div>
       {query.isPending ? (
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 gap-2.5" aria-label="加载中">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5" aria-label="加载中">
           {Array.from({ length: PAGE_SIZE }, (_, i) => <div key={i} className="aspect-[2/3] rounded-lg bg-chip animate-pulse" />)}
         </div>
       ) : query.isError && !items.length ? (
         <div className="rounded-lg bg-chip p-5 text-center text-sm text-muted">
-          <p>该分类加载失败，其他分类仍可浏览</p>
+          <p>该分类加载失败，可重试或切换其他分类</p>
           <button className="btn-ghost btn-sm mt-2" onClick={() => void query.refetch()}>重新加载</button>
         </div>
       ) : !items.length ? (
         <p className="py-5 text-sm text-faint">该分类暂无推荐内容</p>
       ) : (
         <>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 gap-2.5">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5">
             {items.slice(0, visibleCount).map(item => <DoubanCard key={item.id} item={item} onClick={() => onPick(item.title)} />)}
           </div>
           {items.length > visibleCount && (

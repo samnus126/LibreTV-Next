@@ -41,34 +41,48 @@ async function render(onPick = vi.fn()) {
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
 }
 
-it('shows six categories together and expands only the selected category, with cards still searchable', async () => {
+async function choose(label: string) {
+  const button = Array.from(host.querySelectorAll('button')).find(b => b.textContent === label)!;
+  await act(async () => button.click());
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+}
+
+it('shows one category at a time with the original category controls, preserving search and expansion', async () => {
   vi.stubGlobal('fetch', async (url: string) => reply(url));
   const onPick = vi.fn();
   await render(onPick);
   const sections = Array.from(host.querySelectorAll('section[data-home-category]'));
-  expect(sections).toHaveLength(6);
-  expect(sections.map(s => s.querySelector('h2')?.textContent)).toEqual([
-    '热门电影', '国产剧', '海外剧', '动漫', '综艺', '纪录片',
+  expect(sections).toHaveLength(1);
+  expect(Array.from(host.querySelectorAll('button[aria-pressed]')).map(b => b.textContent)).toEqual([
+    '电影周榜', '国产剧周榜', '海外剧周榜', '国内综艺', '海外综艺', '百度热播剧', '动漫', '纪录片',
   ]);
   for (const section of sections) expect(section.querySelectorAll('[role="button"]')).toHaveLength(12);
   const more = Array.from(sections[0].querySelectorAll('button')).find(b => b.textContent?.includes('查看更多'))!;
   await act(async () => more.click());
   expect(sections[0].querySelectorAll('[role="button"]')).toHaveLength(24);
-  expect(sections[1].querySelectorAll('[role="button"]')).toHaveLength(12);
   await act(async () => (sections[0].querySelector('[role="button"]') as HTMLElement).click());
   expect(onPick).toHaveBeenCalledWith('电影1');
+  await choose('动漫');
+  expect(host.querySelectorAll('section[data-home-category]')).toHaveLength(1);
+  expect(host.querySelector('section[data-home-category="movie"]')).toBeNull();
+  expect(host.querySelectorAll('section[data-home-category="anime"] [role="button"]')).toHaveLength(12);
+  await choose('电影周榜');
+  expect(host.querySelectorAll('section[data-home-category="movie"] [role="button"]')).toHaveLength(12);
 });
 
-it('keeps successful categories visible when one fails, and retries the failed category', async () => {
+it('allows switching away from a failed category and retrying it later', async () => {
   let unavailable = true;
   vi.stubGlobal('fetch', async (url: string) => {
     if (unavailable && url.includes('douban_movie_weekly')) return Response.json({ error: 'upstream down' }, { status: 502 });
     return reply(url);
   });
   await render();
-  const movie = host.querySelector('section[data-home-category="movie"]');
+  let movie = host.querySelector('section[data-home-category="movie"]');
   expect(movie?.textContent).toContain('加载失败');
+  await choose('国产剧周榜');
   expect(host.querySelectorAll('section[data-home-category="chinese"] [role="button"]')).toHaveLength(12);
+  await choose('电影周榜');
+  movie = host.querySelector('section[data-home-category="movie"]');
   unavailable = false;
   await act(async () => (movie!.querySelector('button') as HTMLButtonElement).click());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
