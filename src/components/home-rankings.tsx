@@ -16,6 +16,16 @@ const CATEGORIES = [
   { id: 'baidu', title: '百度热播剧', source: '百度热播剧榜', list: 'baidu_teleplay' },
   { id: 'anime', title: '动漫', source: '豆瓣动画电影 · 日本动画推荐' },
   { id: 'documentary', title: '纪录片', source: '豆瓣纪录片推荐', type: 'tv', tag: '纪录片' },
+  { id: 'movie-latest', title: '最新电影', source: '豆瓣最新电影推荐', type: 'movie', tag: '最新' },
+  { id: 'movie-top', title: '高分电影', source: '豆瓣高分电影推荐', type: 'movie', tag: '豆瓣高分' },
+  { id: 'movie-classic', title: '经典电影', source: '豆瓣经典电影推荐', type: 'movie', tag: '经典' },
+  { id: 'movie-hidden', title: '冷门佳片', source: '豆瓣冷门佳片推荐', type: 'movie', tag: '冷门佳片' },
+  { id: 'tv-chinese', title: '国产剧', source: '豆瓣国产剧推荐', type: 'tv', tag: '国产剧' },
+  { id: 'tv-american', title: '美剧', source: '豆瓣美剧推荐', type: 'tv', tag: '美剧' },
+  { id: 'tv-british', title: '英剧', source: '豆瓣英剧推荐', type: 'tv', tag: '英剧' },
+  { id: 'tv-korean', title: '韩剧', source: '豆瓣韩剧推荐', type: 'tv', tag: '韩剧' },
+  { id: 'tv-japanese', title: '日剧', source: '豆瓣日剧推荐', type: 'tv', tag: '日剧' },
+  { id: 'tv-hongkong', title: '港剧', source: '豆瓣港剧推荐', type: 'tv', tag: '港剧' },
 ] as const;
 
 type Category = (typeof CATEGORIES)[number];

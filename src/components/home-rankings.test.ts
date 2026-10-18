@@ -27,8 +27,9 @@ afterEach(async () => {
 });
 
 function reply(url: string) {
+  const tag = new URL(url, 'https://example.test').searchParams.get('tag');
   return Response.json({ items: Array.from({ length: 50 }, (_, i) => ({
-    id: String(i), title: `${url.includes('douban_movie_weekly') ? '电影' : '影片'}${i + 1}`,
+    id: String(i), title: `${url.includes('douban_movie_weekly') ? '电影' : tag || '影片'}${i + 1}`,
     cover: '', rating: '8.0',
   })) });
 }
@@ -55,6 +56,7 @@ it('shows one category at a time with the original category controls, preserving
   expect(sections).toHaveLength(1);
   expect(Array.from(host.querySelectorAll('button[aria-pressed]')).map(b => b.textContent)).toEqual([
     '电影周榜', '国产剧周榜', '海外剧周榜', '国内综艺', '海外综艺', '百度热播剧', '动漫', '纪录片',
+    '最新电影', '高分电影', '经典电影', '冷门佳片', '国产剧', '美剧', '英剧', '韩剧', '日剧', '港剧',
   ]);
   for (const section of sections) expect(section.querySelectorAll('[role="button"]')).toHaveLength(12);
   const more = Array.from(sections[0].querySelectorAll('button')).find(b => b.textContent?.includes('查看更多'))!;
@@ -68,6 +70,9 @@ it('shows one category at a time with the original category controls, preserving
   expect(host.querySelectorAll('section[data-home-category="anime"] [role="button"]')).toHaveLength(12);
   await choose('电影周榜');
   expect(host.querySelectorAll('section[data-home-category="movie"] [role="button"]')).toHaveLength(12);
+  await choose('韩剧');
+  expect(host.querySelectorAll('section[data-home-category]')).toHaveLength(1);
+  expect(host.querySelector('[role="button"]')?.textContent).toContain('韩剧1');
 });
 
 it('allows switching away from a failed category and retrying it later', async () => {
