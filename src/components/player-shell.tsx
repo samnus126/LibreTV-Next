@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
-import { enableHlsAirPlay } from '@/lib/airplay';
+import { startNativeHlsPlayback, supportsNativeAirPlay } from '@/lib/airplay';
 import { shouldThrottlePrefetch } from '@/lib/playback-bandwidth';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
@@ -69,6 +69,8 @@ export function PlayerShell({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const artRef = useRef<any>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const nativePlaybackRef = useRef(false);
+  const nativeCleanupRef = useRef<(() => void) | null>(null);
   const [error, setError] = useState('');
   const [hint, setHint] = useState('');
   // 起播前的品牌占位图（沿用旧版 nomedia 素材），实际开始播放后隐藏
@@ -145,6 +147,7 @@ export function PlayerShell({
 
   // 当前集预取（episodeKey 缺省 = 关闭，见 ensure 内部 settings.enabled 判断）
   const ensurePrefetch = (mediaUrl: string, currentTime: number, horizonSeconds?: number) => {
+    if (nativePlaybackRef.current) return;
     const p = propsRef.current;
     if (!p.episodeKey) return;
     getVideoPrefetcher().ensure({
@@ -171,16 +174,25 @@ export function PlayerShell({
    * 自动改走同源 cookie 鉴权的 /api/proxy 重试一次。
    * 注意：不销毁 ArtPlayer，只销毁并重建 hls，从而保留网页全屏等播放器状态。
    */
-  const setupHls = (video: HTMLVideoElement, mediaUrl: string, allowProxyFallback: boolean) => {
+  const setupHls = (
+    video: HTMLVideoElement,
+    mediaUrl: string,
+    allowProxyFallback: boolean,
+    preferNative = true,
+    resumePosition?: number
+  ) => {
     prefetchThrottledRef.current = true;
     getVideoPrefetcher().setThrottled(true);
     getNextEpisodePrefetcher().setThrottled(true);
     restoreCleanupRef.current?.();
     restoreCleanupRef.current = null;
+    nativeCleanupRef.current?.();
+    nativeCleanupRef.current = null;
+    nativePlaybackRef.current = false;
     hlsRef.current?.destroy();
+    hlsRef.current = null;
+    if (resumePosition !== undefined) restoredRef.current = false;
     currentMediaUrlRef.current = mediaUrl;
-    const hls = new Hls(buildHlsConfig());
-    hlsRef.current = hls;
 
     let restoreInFlight = false;
     const restoreAndStart = async () => {
@@ -193,10 +205,10 @@ export function PlayerShell({
 
       restoreInFlight = true;
       try {
-        const saved = (await propsRef.current.getRestorePosition?.()) ?? 0;
+        const saved = resumePosition ?? (await propsRef.current.getRestorePosition?.()) ?? 0;
         const currentDuration = artRef.current?.duration || video.duration || duration;
         let prefetchAnchor = video.currentTime;
-        if (saved > 10 && Number.isFinite(currentDuration) && saved < currentDuration - 2) {
+        if (saved > (resumePosition === undefined ? 10 : 0) && Number.isFinite(currentDuration) && saved < currentDuration - 2) {
           if (artRef.current) artRef.current.currentTime = saved;
           prefetchAnchor = saved;
           showHint(`已从 ${formatTime(saved)} 继续播放`);
@@ -220,9 +232,27 @@ export function PlayerShell({
       restoreEvents.forEach((event) => video.removeEventListener(event, onRestoreEvent));
     };
 
-    hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-      enableHlsAirPlay(video, propsRef.current.url);
-    });
+    // Safari native HLS keeps one playback pipeline on phone and receiver.
+    // Do not advertise a cookie-authenticated proxy URL to an AirPlay device.
+    if (preferNative && supportsNativeAirPlay(video) && /^https?:\/\//i.test(mediaUrl)) {
+      nativePlaybackRef.current = true;
+      getVideoPrefetcher().stop();
+      getNextEpisodePrefetcher().stop();
+      if (propsRef.current.adFilter) showHint('Safari 投屏兼容播放下，网页广告过滤暂不生效');
+      nativeCleanupRef.current = startNativeHlsPlayback(video, mediaUrl, {
+        startTime: resumePosition,
+        onError: () => {
+          const position = restoredRef.current || video.currentTime > 0 ? video.currentTime : resumePosition;
+          showHint('该源系统播放失败，已切回网页播放，暂不支持隔空播放');
+          setupHls(video, mediaUrl, allowProxyFallback, false, position);
+        },
+        onRemoteError: () => showHint('接收设备未能播放该源，退出隔空播放可恢复手机播放'),
+        onPlayRejected: () => showHint('请点击播放继续观看'),
+      });
+      return;
+    }
+    const hls = new Hls(buildHlsConfig());
+    hlsRef.current = hls;
     hls.loadSource(mediaUrl);
     hls.attachMedia(video);
 
@@ -407,13 +437,15 @@ export function PlayerShell({
       reportVideoHeight();
     });
     art.on('video:error', () => {
+      // Native playback owns its errors, including remote-device failures.
+      if (nativePlaybackRef.current) return;
       mediaHealthyRef.current = false;
       // 起播阶段的 video 元素级错误（MSE/解码偶发失败）：重建一次播放链路自愈，
       // 而不是直接钉死错误遮罩——重建后视频轨重新 append，黑屏有声即可解除
       if (!playbackStartedRef.current && !videoErrorRetryUsedRef.current) {
         videoErrorRetryUsedRef.current = true;
         showHint('播放异常，正在重试...');
-        setupHls(art.video, currentMediaUrlRef.current, true);
+        setupHls(art.video, currentMediaUrlRef.current, true, false, art.video.currentTime);
         return;
       }
       setError('视频播放失败，请尝试其他视频源');
@@ -579,6 +611,9 @@ export function PlayerShell({
       if (controlHideTimer) clearTimeout(controlHideTimer);
       restoreCleanupRef.current?.();
       restoreCleanupRef.current = null;
+      nativeCleanupRef.current?.();
+      nativeCleanupRef.current = null;
+      nativePlaybackRef.current = false;
       Artplayer.CONTROL_HIDE_TIME = previousControlHideTime;
       hlsRef.current?.destroy();
       hlsRef.current = null;
@@ -604,6 +639,10 @@ export function PlayerShell({
   const firstAdFilterRef = useRef(true);
   useEffect(() => {
     if (firstAdFilterRef.current) { firstAdFilterRef.current = false; return; }
+    if (nativePlaybackRef.current) {
+      if (adFilter) showHint('Safari 投屏兼容播放下，网页广告过滤暂不生效');
+      return;
+    }
     if (artRef.current && hlsRef.current) {
       // 用当前实际媒体地址：代理回退生效时切广告过滤不应跳回直连形式
       loadEpisode(currentMediaUrlRef.current || propsRef.current.url);
