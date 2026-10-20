@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
 import { createNativeAirPlay, enableHlsAirPlay, getPlaybackProgress } from '@/lib/airplay';
+import { createWebFullscreenRotation, isAppleMobile } from '@/lib/player-orientation';
 import { shouldThrottlePrefetch } from '@/lib/playback-bandwidth';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
@@ -339,6 +340,7 @@ export function PlayerShell({
     endedRef.current = false;
 
     let lastSave = 0;
+    const appleMobile = isAppleMobile(navigator);
 
     const art = new Artplayer({
       container: containerRef.current,
@@ -354,7 +356,7 @@ export function PlayerShell({
       aspectRatio: true,
       fullscreen: true,
       fullscreenWeb: true,
-      autoOrientation: true,
+      autoOrientation: !appleMobile,
       miniProgressBar: true,
       mutex: true,
       backdrop: true,
@@ -371,6 +373,11 @@ export function PlayerShell({
       },
     });
     artRef.current = art;
+    const webRotation = appleMobile ? createWebFullscreenRotation(art.template.$player, art.video, rotated => {
+      (art as unknown as { isRotate: boolean }).isRotate = rotated;
+      art.emit('resize');
+    }) : null;
+    art.on('fullscreenWeb', active => webRotation?.setActive(active));
     const savePlaybackProgress = (callback: PlayerShellProps['onPause']) => {
       const progress = getPlaybackProgress(art.video, restoredRef.current, nativeAirPlayRef.current);
       if (!progress) return false;
@@ -629,6 +636,7 @@ export function PlayerShell({
       restoreCleanupRef.current?.();
       restoreCleanupRef.current = null;
       Artplayer.CONTROL_HIDE_TIME = previousControlHideTime;
+      webRotation?.dispose();
       nativeAirPlay.dispose();
       nativeAirPlayRef.current = null;
       hlsRef.current?.destroy();

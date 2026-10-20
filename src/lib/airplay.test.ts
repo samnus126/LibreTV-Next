@@ -95,7 +95,7 @@ describe('explicit native AirPlay handoff', () => {
     controller.dispose();
   });
 
-  it('restores the last position on return and can open the picker on a second round trip', () => {
+  it('keeps the native media on return and reopens the picker without reloading', () => {
     const { video, controller, restore, wireless } = nativeMedia();
     controller.request('https://media.example/episode.m3u8');
     video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
@@ -104,14 +104,17 @@ describe('explicit native AirPlay handoff', () => {
     video.dispatchEvent(new video.ownerDocument.defaultView!.Event('timeupdate'));
     video.currentTime = 0; // Safari can reset the element while disconnecting.
     wireless(false);
-    expect(restore).toHaveBeenLastCalledWith(158, true);
-    expect(controller.active).toBe(false);
-    expect(video.crossOrigin).toBe('anonymous');
+    expect(restore).not.toHaveBeenCalled();
+    expect(controller.active).toBe(true);
+    expect(controller.progress.position).toBe(158);
+    expect(video.currentTime).toBe(158);
+    expect(video.hasAttribute('crossorigin')).toBe(false);
     controller.request('https://media.example/episode.m3u8');
     wireless(true);
     wireless(false);
     expect(video.webkitShowPlaybackTargetPicker).toHaveBeenCalledTimes(2);
-    expect(restore).toHaveBeenCalledTimes(2);
+    expect(restore).not.toHaveBeenCalled();
+    expect(video.load).toHaveBeenCalledOnce();
     controller.dispose();
   });
 
@@ -158,7 +161,9 @@ describe('explicit native AirPlay handoff', () => {
     video.pause();
     video.dispatchEvent(new video.ownerDocument.defaultView!.Event('pause'));
     wireless(false);
-    expect(restore).toHaveBeenCalledWith(0, false);
+    expect(restore).not.toHaveBeenCalled();
+    expect(controller.progress.position).toBe(0);
+    expect(video.paused).toBe(true);
     controller.dispose();
   });
 
@@ -287,5 +292,20 @@ it('allows a backward user seek whose canplay arrives before seeked', () => {
   seeking = false;
   video.dispatchEvent(new video.ownerDocument.defaultView!.Event('seeked'));
   expect(getPlaybackProgress(video, true, controller)?.position).toBe(30);
+  controller.dispose();
+});
+
+
+it('retains local pause intent after returning from AirPlay if native playback later fails', () => {
+  const { video, controller, restore, wireless } = nativeMedia();
+  controller.request('https://media.example/episode.m3u8');
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+  wireless(true);
+  wireless(false);
+  video.currentTime = 150;
+  video.pause();
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('pause'));
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('error'));
+  expect(restore).toHaveBeenCalledWith(150, false);
   controller.dispose();
 });

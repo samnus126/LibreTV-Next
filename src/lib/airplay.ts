@@ -76,7 +76,7 @@ export function createNativeAirPlay(video: AirPlayVideo, hooks: NativeAirPlayHoo
   };
   const recordPlaybackIntent = () => {
     // Ignore pauses caused by detaching MMS or disconnecting the remote route.
-    if (active && !seekPending && video.webkitCurrentPlaybackTargetIsWireless) shouldPlay = !video.paused;
+    if (active && !seekPending && (video.webkitCurrentPlaybackTargetIsWireless || !connected)) shouldPlay = !video.paused;
   };
   const seek = () => {
     if (!active || !seekPending || !Number.isFinite(video.duration) || video.duration <= 0) return;
@@ -100,7 +100,16 @@ export function createNativeAirPlay(video: AirPlayVideo, hooks: NativeAirPlayHoo
       if (!seekPending && !video.seeking && position > 1 && video.currentTime < position - 1) { seekPending = true; seek(); }
       else confirmSeek();
       recordPlaybackIntent();
-    } else if (connected) restore();
+    } else if (connected) {
+      // Keep the working native decoder when the receiver hands playback back.
+      // Replacing it with MMS inside this route event races Safari's local video layer.
+      recordPosition();
+      connected = false;
+      if (!video.seeking && position > 1 && video.currentTime < position - 1) {
+        seekPending = true;
+        seek();
+      }
+    }
   };
   const onError = (event?: Event) => {
     if (!active) return;
