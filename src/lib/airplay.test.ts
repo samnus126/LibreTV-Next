@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
-import { createNativeAirPlay, enableHlsAirPlay } from './airplay';
+import { createNativeAirPlay, enableHlsAirPlay, getPlaybackProgress } from './airplay';
 
 function media() {
   const dom = new JSDOM('<video><source src="blob:local-stream" type="video/mp4"></video>');
@@ -56,7 +56,7 @@ function nativeMedia(ordinaryError?: () => void) {
   };
   let paused = false;
   Object.defineProperty(video, 'paused', { get: () => paused });
-  Object.defineProperty(video, 'duration', { get: () => 600 });
+  Object.defineProperty(video, 'duration', { get: () => 600, configurable: true });
   video.currentTime = 120;
   video.crossOrigin = 'anonymous';
   video.load = vi.fn();
@@ -173,4 +173,119 @@ describe('explicit native AirPlay handoff', () => {
     expect(ordinaryError).toHaveBeenCalledOnce();
     controller.dispose();
   });
+});
+
+
+describe('AirPlay progress protection', () => {
+  it('sets the resume position before starting native playback or opening the picker', () => {
+    const { video, controller } = nativeMedia();
+    video.load = vi.fn(() => { video.currentTime = 0; });
+    const startedAt: number[] = [];
+    video.play = vi.fn(async () => { startedAt.push(video.currentTime); });
+    video.webkitShowPlaybackTargetPicker = vi.fn(() => { expect(video.currentTime).toBe(120); });
+    controller.request('https://media.example/episode.m3u8');
+    expect(startedAt).toEqual([120]);
+    controller.dispose();
+  });
+
+  it('retains the last safe progress while metadata and the resume seek are pending', () => {
+    const { video, controller } = nativeMedia();
+    controller.request('https://media.example/episode.m3u8');
+    video.currentTime = 0;
+    expect(getPlaybackProgress(video, true, controller)).toEqual({ position: 120, duration: 600 });
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+    video.currentTime = 1;
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('timeupdate'));
+    expect(getPlaybackProgress(video, true, controller)).toEqual({ position: 120, duration: 600 });
+    video.currentTime = 120;
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('seeked'));
+    video.currentTime = 128;
+    expect(getPlaybackProgress(video, true, controller)).toEqual({ position: 128, duration: 600 });
+    controller.dispose();
+  });
+
+  it('retains duration across a temporary native reload and saves before fallback teardown', () => {
+    const { video, controller, restore } = nativeMedia();
+    controller.request('https://media.example/episode.m3u8');
+    Object.defineProperty(video, 'duration', { get: () => NaN, configurable: true });
+    video.currentTime = 0;
+    expect(getPlaybackProgress(video, true, controller)).toEqual({ position: 120, duration: 600 });
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('error'));
+    expect(restore).toHaveBeenCalledWith(120, true);
+    expect(getPlaybackProgress(video, false, controller)).toBeNull();
+    controller.dispose();
+  });
+
+  it('retries the saved seek when the receiver resets the element on connection', () => {
+    const { video, controller, wireless } = nativeMedia();
+    controller.request('https://media.example/episode.m3u8');
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+    video.dispatchEvent(new video.ownerDocument.defaultView!.Event('seeked'));
+    video.currentTime = 0;
+    wireless(true);
+    expect(video.currentTime).toBe(120);
+    controller.dispose();
+  });
+
+  it('does not save a reload zero until normal restoration has completed', () => {
+    const { video } = nativeMedia();
+    video.currentTime = 0;
+    expect(getPlaybackProgress(video, false)).toBeNull();
+    Object.defineProperty(video, 'seeking', { get: () => true });
+    expect(getPlaybackProgress(video, true)).toBeNull();
+  });
+});
+
+
+it('does not replace the saved progress with a low timeupdate during route renegotiation', () => {
+  const { video, controller, wireless } = nativeMedia();
+  controller.request('https://media.example/episode.m3u8');
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+  wireless(true);
+  video.currentTime = 2;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('timeupdate'));
+  expect(getPlaybackProgress(video, true, controller)?.position).toBe(120);
+  video.currentTime = 30;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('seeked'));
+  expect(getPlaybackProgress(video, true, controller)?.position).toBe(30);
+  controller.dispose();
+});
+
+
+it('does not checkpoint an active handoff before normal history restoration completes', () => {
+  const { video, controller } = nativeMedia();
+  video.currentTime = 0;
+  controller.request('https://media.example/episode.m3u8');
+  expect(getPlaybackProgress(video, false, controller)).toBeNull();
+  controller.dispose();
+});
+
+it.each(['loadedmetadata', 'canplay'])('resumes after a receiver reload arriving after connection: %s', event => {
+  const { video, controller, wireless } = nativeMedia();
+  controller.request('https://media.example/episode.m3u8');
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+  wireless(true);
+  video.currentTime = 160;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('timeupdate'));
+  video.currentTime = 0;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event(event));
+  expect(video.currentTime).toBe(160);
+  controller.dispose();
+});
+
+
+it('allows a backward user seek whose canplay arrives before seeked', () => {
+  const { video, controller, wireless } = nativeMedia();
+  controller.request('https://media.example/episode.m3u8');
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('loadedmetadata'));
+  wireless(true);
+  let seeking = true;
+  Object.defineProperty(video, 'seeking', { get: () => seeking });
+  video.currentTime = 30;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('canplay'));
+  expect(video.currentTime).toBe(30);
+  seeking = false;
+  video.dispatchEvent(new video.ownerDocument.defaultView!.Event('seeked'));
+  expect(getPlaybackProgress(video, true, controller)?.position).toBe(30);
+  controller.dispose();
 });

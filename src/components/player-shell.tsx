@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Artplayer from 'artplayer';
 import Hls, { type HlsConfig } from 'hls.js';
-import { createNativeAirPlay, enableHlsAirPlay } from '@/lib/airplay';
+import { createNativeAirPlay, enableHlsAirPlay, getPlaybackProgress } from '@/lib/airplay';
 import { shouldThrottlePrefetch } from '@/lib/playback-bandwidth';
 
 import { PlaybackRecovery, describeHlsError } from '@/lib/playback-recovery';
@@ -371,8 +371,15 @@ export function PlayerShell({
       },
     });
     artRef.current = art;
+    const savePlaybackProgress = (callback: PlayerShellProps['onPause']) => {
+      const progress = getPlaybackProgress(art.video, restoredRef.current, nativeAirPlayRef.current);
+      if (!progress) return false;
+      callback?.(progress.position, progress.duration);
+      return true;
+    };
     const nativeAirPlay = createNativeAirPlay(art.video, {
       beforeNative: () => {
+        savePlaybackProgress(propsRef.current.onPause);
         restoreCleanupRef.current?.();
         restoreCleanupRef.current = null;
         recoveryRef.current?.dispose();
@@ -396,6 +403,10 @@ export function PlayerShell({
         name: 'airplay', position: 'right', index: 50,
         html: art.icons.airplay, tooltip: '隔空播放',
         click: () => {
+          if (!nativeAirPlay.active && (!restoredRef.current || art.video.seeking)) {
+            showHint('正在恢复播放进度，请稍后再投屏');
+            return;
+          }
           if (!nativeAirPlay.request(propsRef.current.url)) showHint('当前浏览器或视频源暂不支持隔空播放');
         },
       });
@@ -460,8 +471,7 @@ export function PlayerShell({
       updatePrefetchPriority();
       const now = Date.now();
       if (now - lastSave > 5000) {
-        lastSave = now;
-        propsRef.current.onTimeUpdate?.(art.currentTime, art.duration);
+        if (savePlaybackProgress(propsRef.current.onTimeUpdate)) lastSave = now;
       }
       // 每 30s 续跑一次前向预取窗口（ensure 幂等，窗口未覆盖足够余量才会重建）
       if (now - lastPrefetchEnsureRef.current > 30_000) {
@@ -476,8 +486,8 @@ export function PlayerShell({
       ensurePrefetch(currentMediaUrlRef.current, art.currentTime);
     });
     art.on('video:pause', () => {
+      savePlaybackProgress(propsRef.current.onPause);
       if (nativeAirPlay.active) return;
-      propsRef.current.onPause?.(art.currentTime, art.duration);
       // 暂停 = 预取黄金窗口：解除限速并无限铺满整集（用户主动行为，带宽占用可接受）
       // waiting 触发的限速在此解除，否则黄金窗口会被 500ms 轮询冻结
       updatePrefetchPriority();
@@ -591,7 +601,7 @@ export function PlayerShell({
     // 卸载与页面隐藏时保存进度
     const saveOnHide = () => {
       if (document.visibilityState === 'hidden') {
-        propsRef.current.onPause?.(art.currentTime, art.duration);
+        savePlaybackProgress(propsRef.current.onPause);
       }
     };
     document.addEventListener('visibilitychange', saveOnHide);
@@ -601,7 +611,7 @@ export function PlayerShell({
       // 已自然播完的集数不回写，避免覆盖 onEnded 里清除的「已看完」记录
       if (!endedRef.current) {
         try {
-          propsRef.current.onPause?.(art.currentTime, art.duration);
+          savePlaybackProgress(propsRef.current.onPause);
         } catch { /* 忽略 */ }
       }
       document.removeEventListener('keydown', shortcuts);
